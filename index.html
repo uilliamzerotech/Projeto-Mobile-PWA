@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bootstrap demo</title>
+    <link href="css/bootstrap.min.css" rel="stylesheet" />
+    <link rel="manifest" href="manifest.json">
+  </head>
+  <body>
+    <div class="container">
+        <div class="row">
+            <h1 align="center">Gestão de despesas em viagens</h1>
+            <hr/>
+        </div>
+        <form id="form">
+            <div class="row mb-3">
+                <input type="hidden" id="itemId" value="-1"/>
+                <div class="col-md-6 col-lg-4 col-sm-12">
+                    <label>Descrição do Item</label>
+                    <input type="text" id="descricao" required class="form-control" />
+                </div>
+                <div class="col-md-3 col-lg-2 col-sm-12">
+                    <label>Qtd</label>
+                    <input type="number" id="qtd" min="1" required class="form-control" />
+                </div>
+                <div class="col-md-3 col-lg-2 col-sm-12">
+                    <label>Valor</label>
+                    <input type="number" id="valor" min="1" required class="form-control" />
+                </div>
+                <div class="col-md-6 col-lg-2 col-sm-12">
+                    <label>De</label>
+                    <select class="form-control" id="currency1"></select>
+                </div>
+                <div class="col-md-6 col-lg-2 col-sm-12">
+                    <label>Para</label>
+                    <select class="form-control" id="currency2"></select>
+                </div>
+            </div>
+            <button class="btn btn-danger" type="reset">Limpar</button>
+            <input type="submit" class="btn btn-primary" value="Gravar"/>
+        </form>
+        <section id="TbGravados">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Descrição</th>
+                        <th>Qtd</th>
+                        <th>Valor</th>
+                        <th>Valor (de)</th>
+                        <th>Valor (para)</th>
+                        <th>Total</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody id="tblItems"></tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="6">Total Moeda Origem: <span id="totalOrigem"></span></td>
+                    </tr>
+                    <tr>
+                        <td colspan="6">Total Moeda Destino: <span id="totalDestino"></span></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </section>
+    </div>
+    <script src="js/jquery-3.7.1.min.js"></script>
+    <script src="js/bootstrap.bundle.min.js" defer></script>
+    <script>
+        const items = JSON.parse(localStorage.getItem('items')) || [];
+        $(document).ready(function() {
+            $.ajax({
+                url: 'https://v6.exchangerate-api.com/v6/codes',
+                method: 'GET',
+                headers: {
+                    'Authorization': 'Bearer ae80148dcb582c0687762194'
+                },
+                success: function(response) {
+                    if (response.result === "success") {
+                        populateDropdowns(response.supported_codes);
+                    } else {
+                        alert('Erro ao obter os dados para o dropdown');
+                    }
+                },
+                error: function() {
+                    alert('Deu ruim! verifique a chave da api');
+                }
+            });
+
+            function populateDropdowns(supportedCodes) {
+                var options = '';
+                supportedCodes.forEach(function(code) {
+                    options += `<option value="${code[0]}">${code[1]} (${code[0]})</option>`;
+                });
+
+                $('#currency1').html(options);
+                $('#currency2').html(options);
+            }
+
+            function updateTable() {
+                $('#tblItems').empty();
+                let totalOrigem = 0;
+                let totalDestino = 0;
+                items.forEach((item, index) => {
+                    $('#tblItems').append(`
+                        <tr data-index="${index}">
+                            <td>${item.DSC}</td>
+                            <td>${item.QTD}</td>
+                            <td>${item.amount}</td>
+                            <td>${item.DE}</td>
+                            <td>${item.PARA}</td>
+                            <td>${item.valorConvertido}</td>
+                            <td>
+                                <button class="btn btn-primary edit">Editar</button>
+                                <button class="btn btn-danger delete">Excluir</button>
+                            </td>
+                        </tr>
+                    `);
+                    totalOrigem += item.amount;
+                    totalDestino += item.valorConvertido;
+                });
+                $('#totalOrigem').text(totalOrigem.toFixed(2));
+                $('#totalDestino').text(totalDestino.toFixed(2));
+            }
+
+            function saveItems() {
+                localStorage.setItem('items', JSON.stringify(items));
+            }
+
+            updateTable();
+
+            $('#form').on('submit', function(event) {
+                event.preventDefault();
+                let id = $('#itemId').val();
+                let DE = $('#currency1').val();
+                let PARA = $('#currency2').val();
+                let VALOR = $('#valor').val();
+                let QTD = $('#qtd').val();
+                let DSC = $('#descricao').val();
+
+                $.ajax({
+                    url: `https://v6.exchangerate-api.com/v6/pair/${DE}/${PARA}/${VALOR}`,
+                    method: 'GET',
+                    headers: {
+                        'Authorization': 'Bearer ae80148dcb582c0687762194'
+                    },
+                    success: function(response) {
+                        if (response.result === "success") {
+                            let diferenca = response["conversion_rate"];
+                            let valorConvertido = ((QTD * VALOR) * diferenca).toFixed(2);
+                            const item = {
+                                DSC,
+                                QTD: parseFloat(QTD),
+                                amount: parseFloat(VALOR),
+                                DE,
+                                PARA,
+                                valorConvertido: parseFloat(valorConvertido)
+                            };
+                            if (id == '-1') {
+                                items.push(item);
+                            } else {
+                                items[id] = item;
+                                $('#itemId').val('-1');
+                            }
+                            saveItems();
+                            updateTable();
+                            $('#form')[0].reset();
+                        } else {
+                            alert('Erro ao realizar a conversão');
+                        }
+                    },
+                    error: function() {
+                        alert('Deu ruim! verifique a chave da api');
+                    }
+                });
+            });
+
+            $(document).on('click', '.edit', function() {
+                let index = $(this).closest('tr').data('index');
+                let item = items[index];
+                $('#itemId').val(index);
+                $('#descricao').val(item.DSC);
+                $('#qtd').val(item.QTD);
+                $('#valor').val(item.amount);
+                $('#currency1').val(item.DE);
+                $('#currency2').val(item.PARA);
+            });
+
+            $(document).on('click', '.delete', function() {
+                let index = $(this).closest('tr').data('index');
+                items.splice(index, 1);
+                saveItems();
+                updateTable();
+            });
+        });
+    </script>
+    <script>
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', function() {
+            navigator.serviceWorker.register('/service-worker.js').then(function(registration) {
+              console.log('ServiceWorker registration successful with scope: ', registration.scope);
+            }, function(error) {
+              console.log('ServiceWorker registration failed: ', error);
+            });
+          });
+        }
+      </script>
+  </body>
+</html>
